@@ -1,7 +1,7 @@
 import asyncio
 import secrets
 import string
-import httpx # Не забудь добавить в импорты
+import httpx
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
@@ -21,8 +21,6 @@ bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 api = SMTPDev()
 
-# Кэш для обхода лимита 64 байта в callback_data
-# Храним структуру: {"short_id": {"acc_id": ..., "mbox_id": ..., "msg_id": ...}}
 msg_cache = {}
 
 def gen_pass(length=12):
@@ -47,19 +45,16 @@ async def start(event: types.Message | types.CallbackQuery):
     else:
         await event.message.edit_text(text, reply_markup=kb.as_markup())
 
-# ШАГ 1: Выбор домена
 @dp.callback_query(F.data == "create_step_1")
 async def choose_domain(callback: types.CallbackQuery):
     domains = await api.get_domains()
     kb = InlineKeyboardBuilder()
     for d in domains:
-        # d['domain'] обычно короткий, тут лимит не пробьем
         kb.row(types.InlineKeyboardButton(text=d['domain'], callback_data=f"dom:{d['domain']}"))
     
     kb.row(types.InlineKeyboardButton(text="⬅️ Назад", callback_data="start_over"))
     await callback.message.edit_text("Выбери домен:", reply_markup=kb.as_markup())
 
-# ШАГ 2: Ввод имени или Рандом
 @dp.callback_query(F.data.startswith("dom:"))
 async def ask_name(callback: types.CallbackQuery, state: FSMContext):
     domain = callback.data.split(":")[1]
@@ -72,7 +67,6 @@ async def ask_name(callback: types.CallbackQuery, state: FSMContext):
     await state.set_state(MailStates.waiting_for_name)
     await callback.message.edit_text(f"Выбран домен: {domain}\nНапиши желаемое имя (логин) или нажми кнопку:", reply_markup=kb.as_markup())
 
-# ШАГ 3: Финализация (Создание)
 @dp.message(MailStates.waiting_for_name)
 @dp.callback_query(F.data == "skip_name")
 async def finalize_creation(event: types.Message | types.CallbackQuery, state: FSMContext):
@@ -137,13 +131,11 @@ async def list_messages(callback: types.CallbackQuery):
 
     messages, mailbox_id = await api.get_messages(account_id)
     kb = InlineKeyboardBuilder()
-    
-    # Ссылка для входа (обычный URL, так как Mini App блочит куки)
+
     login_url = f"{WEBMAIL_URL}?_task=login&_action=auth&_user={acc_data['address']}&_pass={acc_data['password']}"
     
     kb.row(types.InlineKeyboardButton(text="🚀 Войти в Webmail", url=login_url))
 
-    # Если сообщений нет
     if not messages:
         kb.row(types.InlineKeyboardButton(text="🔄 Обновить", callback_data=f"view_acc:{account_id}"))
         kb.row(types.InlineKeyboardButton(text="🗑 Удалить ящик", callback_data=f"del_acc:{account_id}"))
@@ -156,7 +148,6 @@ async def list_messages(callback: types.CallbackQuery):
             await callback.answer("Обновлено: писем по-прежнему нет")
         return
 
-    # Список писем
     for msg in messages:
         subject = msg.get('subject') or "(Без темы)"
         btn_text = (subject[:30] + '..') if len(subject) > 30 else subject
@@ -176,8 +167,7 @@ async def list_messages(callback: types.CallbackQuery):
     kb.row(types.InlineKeyboardButton(text="🔄 Обновить", callback_data=f"view_acc:{account_id}"))
     kb.row(types.InlineKeyboardButton(text="🗑 Удалить ящик", callback_data=f"del_acc:{account_id}"))
     kb.row(types.InlineKeyboardButton(text="⬅️ К списку ящиков", callback_data="my_mails"))
-    
-    # Добавляем время обновления, чтобы избежать ошибки "message is not modified"
+
     now = datetime.now().strftime("%H:%M:%S")
     status_text = f"Ящик: {hcode(acc_data['address'])}\nПоследние письма (обновлено в {now}):"
     
@@ -228,7 +218,6 @@ async def read_message(callback: types.CallbackQuery):
     
     await callback.message.edit_text(response, reply_markup=kb.as_markup(), parse_mode="HTML")
 
-# --- Добавил удаление аккаунта, раз в коде есть кнопка ---
 @dp.callback_query(F.data.startswith("del_acc:"))
 async def delete_account(callback: types.CallbackQuery):
     acc_id = callback.data.split(":")[1]
@@ -238,7 +227,6 @@ async def delete_account(callback: types.CallbackQuery):
         r = await client.delete(f"https://api.smtp.dev/accounts/{acc_id}", headers=headers)
     
     if r.status_code == 204:
-        # Предполагаем, что функция в database.py называется именно так
         try:
             db.delete_account_from_db(acc_id) 
             await callback.message.edit_text("✅ Аккаунт полностью удален.")
